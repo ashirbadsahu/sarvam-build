@@ -1,0 +1,159 @@
+<!doctype html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Odia Tutor</title>
+<style>
+:root{--c:#6c8cff}
+*{box-sizing:border-box}
+body{margin:0;height:100vh;display:flex;background:radial-gradient(circle at 50% 35%,#1a1f3a,#0a0b14 70%);color:#e8eaff;font-family:system-ui,sans-serif;overflow:hidden}
+main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:20px;min-width:0}
+#orbwrap{position:relative;width:260px;height:260px;cursor:pointer;user-select:none}
+#orb{position:absolute;inset:0;margin:auto;width:150px;height:150px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#fff8,var(--c) 45%,#000 130%);
+  box-shadow:0 0 40px var(--c),0 0 90px var(--c);transition:background .4s,box-shadow .4s;
+  transform:scale(var(--s,1))}
+.ring{position:absolute;inset:0;margin:auto;width:150px;height:150px;border-radius:50%;border:2px solid var(--c);opacity:0}
+.idle #orb{animation:breathe 3.5s ease-in-out infinite}
+.think #orb{animation:spin 1s linear infinite;background:conic-gradient(var(--c),#000,var(--c))}
+.listen .ring,.speak .ring{animation:ripple 1.8s ease-out infinite}
+.ring:nth-child(2){animation-delay:.6s!important}.ring:nth-child(3){animation-delay:1.2s!important}
+.listen{--c:#ff5c7a}.speak{--c:#4cf0b0}.think{--c:#ffd166}
+@keyframes breathe{50%{transform:scale(1.07)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes ripple{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.8);opacity:0}}
+#status{font-size:.95em;color:#9aa3d6;letter-spacing:.05em;min-height:1.4em}
+#card{text-align:center;min-height:150px;max-width:560px}
+#heard{color:#9aa3d6;font-size:.95em;margin-bottom:8px}
+#hindi{margin:6px 0}
+#od{font-size:3em;color:#ffd166;text-shadow:0 0 20px #ffd16666;line-height:1.2}
+#rm{color:#b6bcec;margin:4px 0}
+#ask{color:#4cf0b0;margin-top:8px}
+aside{width:280px;border-left:1px solid #ffffff18;padding:16px;overflow:auto;background:#00000030}
+aside h3{margin:0 0 8px;font-size:.85em;text-transform:uppercase;letter-spacing:.1em;color:#9aa3d6}
+#calls{font-size:.8em;color:#7b84b8;margin-bottom:18px}
+li{list-style:none;margin:8px 0;padding:8px 10px;background:#ffffff0d;border-radius:8px}
+li b{font-size:1.3em;color:#ffd166;font-weight:500}li small{color:#9aa3d6}
+ul{padding:0;margin:0}
+@media(max-width:700px){aside{display:none}}
+#scene{font-size:1.15em;color:#ffd166;margin-bottom:10px}
+#hint{margin-top:12px;padding:10px 14px;border:1px dashed #4cf0b066;border-radius:10px;color:#4cf0b0}
+#hint:empty{display:none}#hint small{color:#9aa3d6}
+#change{position:absolute;top:14px;left:14px;background:#ffffff12;color:#cfd3ff;border:1px solid #ffffff22;border-radius:8px;padding:6px 12px;cursor:pointer}
+#picker{position:fixed;inset:0;background:#0a0b14ee;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;z-index:5}
+#cards{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;max-width:640px}
+.sc{font-size:1.2em;padding:22px 28px;border-radius:16px;border:1px solid #6c8cff66;background:#6c8cff18;color:#e8eaff;cursor:pointer;box-shadow:0 0 20px #6c8cff22;transition:.2s}
+.sc:hover{background:#6c8cff44;box-shadow:0 0 30px #6c8cff88;transform:translateY(-3px)}
+</style>
+<main>
+  <button id="change">⟲ Change scene</button>
+  <div id="orbwrap" class="idle"><div class="ring"></div><div class="ring"></div><div class="ring"></div><div id="orb"></div></div>
+  <div id="status">Pick a scene to begin</div>
+  <div id="card">
+    <div id="scene"></div><div id="heard"></div><div id="hindi"></div><div id="od"></div><div id="rm"></div><div id="hint"></div>
+  </div>
+</main>
+<div id="picker"><h2>Where do you want to practise Odia?</h2><div id="cards"></div></div>
+<aside>
+  <h3>API calls</h3><div id="calls"></div>
+  <h3>Words learned (<span id="n">0</span>)</h3><ul id="vocab"></ul>
+</aside>
+<script>
+const $=id=>document.getElementById(id), wrap=$('orbwrap'), orb=$('orb');
+const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const AC=new (window.AudioContext||window.webkitAudioContext)();
+let busy=false, rec=null, meter=null, started=false;
+
+function setState(s,msg){wrap.className=s;if(msg!==undefined)$('status').textContent=msg}
+function level(an){const d=new Uint8Array(an.fftSize);an.getByteTimeDomainData(d);let m=0;for(const v of d)m+=Math.abs(v-128);return m/d.length/40}
+function pulse(an){cancelAnimationFrame(meter);const f=()=>{orb.style.setProperty('--s',1+Math.min(level(an),.6));meter=requestAnimationFrame(f)};f()}
+function stopPulse(){cancelAnimationFrame(meter);orb.style.setProperty('--s',1)}
+
+function render(s){
+  $('calls').textContent=`${s.total}/${s.max} · stt ${s.calls.stt} · llm ${s.calls.llm} · tts ${s.calls.tts}`;
+  $('n').textContent=s.vocab.length;
+  $('vocab').innerHTML=s.vocab.map(v=>`<li><b>${esc(v.odia)}</b><br>${esc(v.roman)} <small>— ${esc(v.meaning)}</small></li>`).join('');
+}
+
+// ---- recording: capture PCM, encode 16kHz mono WAV in-browser
+async function startRec(){
+  await AC.resume();
+  const st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+  const src=AC.createMediaStreamSource(st), an=AC.createAnalyser(); an.fftSize=512; src.connect(an);
+  const proc=AC.createScriptProcessor(4096,1,1), chunks=[];
+  proc.onaudioprocess=e=>chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(proc); proc.connect(AC.destination);
+  rec={st,src,proc,chunks,t:Date.now()}; pulse(an);
+  setState('listen','Listening… tap again to send');
+}
+function wav16k(chunks,rate){
+  let n=0;chunks.forEach(c=>n+=c.length);const x=new Float32Array(n);let o=0;chunks.forEach(c=>{x.set(c,o);o+=c.length});
+  const r=rate/16000,m=Math.floor(n/r),pcm=new Int16Array(m);
+  for(let i=0;i<m;i++){const v=Math.max(-1,Math.min(1,x[Math.floor(i*r)]));pcm[i]=v<0?v*32768:v*32767}
+  const b=new ArrayBuffer(44+m*2),d=new DataView(b),w=(p,s)=>[...s].forEach((c,i)=>d.setUint8(p+i,c.charCodeAt(0)));
+  w(0,'RIFF');d.setUint32(4,36+m*2,true);w(8,'WAVEfmt ');d.setUint32(16,16,true);d.setUint16(20,1,true);d.setUint16(22,1,true);
+  d.setUint32(24,16000,true);d.setUint32(28,32000,true);d.setUint16(32,2,true);d.setUint16(34,16,true);w(36,'data');d.setUint32(40,m*2,true);
+  new Int16Array(b,44).set(pcm);return new Blob([b],{type:'audio/wav'});
+}
+function say(text){
+  return new Promise(res=>{
+    if(!text||!window.speechSynthesis)return res();
+    const u=new SpeechSynthesisUtterance(text);u.lang='hi-IN';u.rate=.95;
+    u.onend=u.onerror=()=>res();setTimeout(res,15000);speechSynthesis.speak(u);
+  });
+}
+async function show(j){
+  render(j.state);
+  const p=j.reply;
+  if(j.heard&&j.reply){$('heard').innerHTML=`You said: “${esc(j.heard)}” <small>[${esc(j.lang||'?')}]</small>`}
+  if(j.scenario)$('heard').textContent='';
+  $('scene').textContent=p.scene||'';$('hindi').textContent=p.hindi||'';
+  $('od').textContent=p.odia||'';$('rm').textContent=p.roman?`${p.roman} — ${p.meaning}`:'';
+  $('hint').innerHTML=p.hint_odia?`Try saying: <b>${esc(p.hint_odia)}</b><br><small>${esc(p.hint_roman)} — ${esc(p.hint_meaning)}</small>`:'';
+  setState('speak','Speaking…');
+  await say(p.scene);await say(p.hindi);
+  if(j.audio)await play(j.audio);
+  busy=false;setState('idle','Your turn — tap the orb and reply');
+}
+async function stopRec(){
+  const r=rec;rec=null;stopPulse();
+  r.proc.disconnect();r.src.disconnect();r.st.getTracks().forEach(t=>t.stop());
+  if(Date.now()-r.t<600){setState('idle','Too short — tap and speak');return}
+  busy=true;setState('think','Thinking…');
+  const fd=new FormData();fd.append('audio',wav16k(r.chunks,AC.sampleRate),'a.wav');
+  try{
+    const res=await fetch('/api/turn',{method:'POST',body:fd});
+    if(!res.ok)throw new Error((await res.text()).slice(0,200));
+    const j=await res.json();
+    if(j.error){render(j.state);setState('idle',j.error);busy=false;return}
+    await show(j);
+  }catch(e){setState('idle','⚠ '+e.message);busy=false}
+}
+async function play(b64){
+  const bin=atob(b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+  const buf=await AC.decodeAudioData(u.buffer),s=AC.createBufferSource(),an=AC.createAnalyser();
+  an.fftSize=512;s.buffer=buf;s.connect(an);an.connect(AC.destination);
+  setState('speak','Speaking…');pulse(an);
+  await new Promise(r=>{s.onended=r;s.start()});stopPulse();
+}
+async function toggle(){
+  if(busy||!started)return;
+  try{rec?await stopRec():await startRec()}catch(e){setState('idle','⚠ '+e.message)}
+}
+wrap.onclick=toggle;
+addEventListener('keydown',e=>{if(e.code==='Space'&&started){e.preventDefault();toggle()}});
+async function begin(sid){
+  await AC.resume();
+  $('picker').style.display='none';busy=true;started=true;
+  ['scene','heard','hindi','od','rm','hint'].forEach(i=>$(i).textContent='');
+  setState('think','Setting the scene…');
+  try{
+    const res=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenario:sid})});
+    if(!res.ok)throw new Error((await res.text()).slice(0,200));
+    await show(await res.json());
+  }catch(e){setState('idle','⚠ '+e.message);busy=false;$('picker').style.display='flex';started=false}
+}
+$('change').onclick=()=>{if(!busy&&!rec)$('picker').style.display='flex'};
+fetch('/api/state').then(r=>r.json()).then(s=>{
+  render(s);
+  $('cards').innerHTML=Object.entries(s.scenarios).map(([k,v])=>`<button class="sc" onclick="begin('${k}')">${esc(v)}</button>`).join('');
+});
+</script>
